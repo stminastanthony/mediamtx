@@ -1,0 +1,52 @@
+# St Mina & St Anthony's build of MediaMTX, for the stream relay on smsa-server
+# (github.com/stminastanthony/church-tech, smsa-server/relay.yml). It is upstream's
+# release with fixes not yet released upstream, taken in by go.mod's replace lines:
+#   github.com/stminastanthony/gortmplib, branch hevc-keyframes: enhanced RTMP video
+#   frames marked as key or inter frames, without which YouTube shows no picture for
+#   HEVC forwarded by MediaMTX (bluenviron/gortmplib pull request).
+# Pushing a tag v<upstream version>-smsa.<n> builds it for Linux amd64 and publishes a
+# release with the tarball named as upstream names theirs, and its SHA-256. Upstream's
+# own workflows are removed on this branch.
+name: smsa release
+
+on:
+  push:
+    tags: ["v*-smsa.*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: Build, as upstream's Makefile does
+        env:
+          CGO_ENABLED: "0"
+          GOOS: linux
+          GOARCH: amd64
+        run: |
+          go generate ./...
+          mkdir tmp
+          go build -o tmp/mediamtx
+          cp mediamtx.yml LICENSE tmp/
+          name="mediamtx_$(cat internal/core/VERSION)_linux_amd64.tar.gz"
+          tar -C tmp -czf "$name" --owner=0 --group=0 mediamtx mediamtx.yml LICENSE
+          sha256sum "$name" > checksums.sha256
+          cat checksums.sha256
+
+      - name: Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" mediamtx_*_linux_amd64.tar.gz checksums.sha256 \
+            --title "$GITHUB_REF_NAME" \
+            --notes "MediaMTX ${GITHUB_REF_NAME%-smsa.*} with enhanced RTMP video frames marked as key or inter frames (github.com/stminastanthony/gortmplib, branch hevc-keyframes). Built for smsa-server; Linux amd64 only."
